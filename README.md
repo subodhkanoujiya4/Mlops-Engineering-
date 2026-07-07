@@ -1,123 +1,74 @@
-# MLOps Task 0 – Rolling Mean Signal Batch Pipeline
+# MLOps Task 0 — Rolling-Mean Signal Batch Job
 
-A reproducible MLOps-style batch processing pipeline built in Python as part of the ML Engineering Internship Technical Assessment.
+A minimal, reproducible MLOps-style batch job that:
 
-## Features
+- Loads config from YAML (`seed`, `window`, `version`)
+- Reads OHLCV data from CSV
+- Computes a rolling mean on `close`
+- Generates a binary signal (`1` if `close > rolling_mean`, else `0`)
+- Writes structured metrics (`metrics.json`) and detailed logs (`run.log`)
+- Runs identically on the host or inside Docker
 
-- Load configuration from `config.yaml`
-- Read OHLCV data from `data.csv`
-- Validate configuration and dataset
-- Compute rolling mean using configurable window size
-- Generate binary trading signal
-- Write structured metrics to `metrics.json`
-- Generate detailed execution logs in `run.log`
-- Dockerized for reproducible execution
-- Deterministic results using configurable random seed
+## Files
 
----
+| File            | Purpose                                      |
+|-----------------|-----------------------------------------------|
+| `run.py`        | Main pipeline script                          |
+| `config.yaml`   | Run configuration (seed, window, version)     |
+| `data.csv`      | Sample OHLCV dataset (10,000 rows)            |
+| `requirements.txt` | Python dependencies                       |
+| `Dockerfile`    | Container build definition                    |
+| `metrics.json`  | Sample output from a successful run           |
+| `run.log`       | Sample log from a successful run              |
 
-## Project Structure
+## Local run
 
-```
-.
-├── run.py
-├── config.yaml
-├── data.csv
-├── requirements.txt
-├── Dockerfile
-├── metrics.json
-├── run.log
-└── README.md
-```
-
----
-
-## Requirements
-
-- Python 3.9+
-- pip
-
-Install dependencies:
+Requires Python 3.9+.
 
 ```bash
 pip install -r requirements.txt
-```
 
----
-
-## Run Locally
-
-Execute the project using:
-
-```bash
 python run.py \
---input data.csv \
---config config.yaml \
---output metrics.json \
---log-file run.log
+  --input data.csv \
+  --config config.yaml \
+  --output metrics.json \
+  --log-file run.log
 ```
 
-No file paths are hardcoded. All input and output locations are provided through CLI arguments.
+The script has no hard-coded paths — all inputs/outputs are passed via CLI flags.
 
----
+### Exit codes
+- `0` — success (metrics written with `"status": "success"`)
+- `1` — failure (metrics still written, with `"status": "error"` and an `error_message`)
 
 ## Docker
 
-### Build Image
+Build:
 
 ```bash
 docker build -t mlops-task .
 ```
 
-### Run Container
+Run:
 
 ```bash
 docker run --rm mlops-task
 ```
 
-The Docker image:
+This bundles `data.csv` and `config.yaml` into the image, runs the pipeline with the
+required CLI, writes `metrics.json` and `run.log` inside the container, and prints the
+final metrics JSON to stdout. Exit code is `0` on success, non-zero on failure.
 
-- Includes `data.csv` and `config.yaml`
-- Executes the pipeline automatically
-- Generates `metrics.json`
-- Generates `run.log`
-- Prints the final metrics JSON to stdout
+To copy the output files out of the container for inspection:
 
----
-
-## Configuration
-
-Example `config.yaml`
-
-```yaml
-seed: 42
-window: 5
-version: "v1"
+```bash
+docker create --name mlops-tmp mlops-task
+docker cp mlops-tmp:/app/metrics.json ./metrics.json
+docker cp mlops-tmp:/app/run.log ./run.log
+docker rm mlops-tmp
 ```
 
----
-
-## Processing Pipeline
-
-1. Load configuration
-2. Validate required configuration fields
-3. Load dataset
-4. Validate CSV structure
-5. Compute rolling mean on the `close` column
-6. Generate binary signal
-
-```
-signal = 1 if close > rolling_mean
-signal = 0 otherwise
-```
-
-7. Compute execution metrics
-8. Save metrics
-9. Write execution logs
-
----
-
-## Example Success Output
+## Example `metrics.json` (success)
 
 ```json
 {
@@ -131,84 +82,27 @@ signal = 0 otherwise
 }
 ```
 
----
-
-## Error Output
+## Example `metrics.json` (error)
 
 ```json
 {
   "version": "v1",
   "status": "error",
-  "error_message": "Missing required column: close"
+  "error_message": "Missing required column: 'close'"
 }
 ```
 
----
+## Design notes
 
-## Validation
-
-The application validates:
-
-- Configuration file exists
-- Required config fields
-- Input CSV exists
-- Valid CSV format
-- Dataset is not empty
-- Required `close` column exists
-
-Errors are:
-
-- Logged to `run.log`
-- Written to `metrics.json`
-- Returned with a non-zero exit code
-
----
-
-## Reproducibility
-
-Deterministic execution is ensured using:
-
-- Configurable random seed
-- YAML-based configuration
-- No hardcoded file paths
-- Consistent rolling mean computation
-
----
-
-## Logging
-
-The application logs:
-
-- Job start
-- Configuration loading
-- Dataset validation
-- Processing steps
-- Metrics summary
-- Job completion
-- Exceptions (if any)
-
----
-
-## Tech Stack
-
-- Python
-- Pandas
-- NumPy
-- PyYAML
-- Logging
-- Docker
-
----
-
-## Author
-
-**Subodh Kanoujiya**
-
-Computer Science (Artificial Intelligence) Engineer
-
-Interested in:
-
-- Machine Learning
-- MLOps
-- Generative AI
-- AI Automation
+- **Reproducibility**: `numpy.random.seed(seed)` is set from config before any processing.
+  Rolling mean and signal logic are purely deterministic given the same input/config, so
+  repeated runs on the same data produce identical `signal_rate` values.
+- **Rolling mean edge case**: the first `window - 1` rows have no full window and are left
+  as `NaN` for `rolling_mean`. Their `signal` is also left undefined (`NaN`) and excluded
+  from the `signal_rate` calculation, so metrics only reflect rows with a fully defined signal.
+- **Validation**: config is checked for required fields/types before use; the dataset is
+  checked for existence, non-emptiness, valid CSV structure, and presence of the `close`
+  column. Any failure is caught, logged with a full traceback, and reported in `metrics.json`
+  with `status: "error"` (the job still exits non-zero and writes both output files).
+- **Observability**: `run.log` captures job start, config validation, rows loaded,
+  each processing step, the metrics summary, and job end/status — including exceptions.
